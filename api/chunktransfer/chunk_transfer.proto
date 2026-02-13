@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+option go_package = "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunktransfer";
+
+package chunktransfer;
+
+import "google/protobuf/empty.proto";
+
+service ChunkTransferService {
+  rpc CreateChunk(CreateChunkRequest) returns (google.protobuf.Empty);
+  rpc WriteBlock(stream WriteBlockRequest) returns (google.protobuf.Empty);
+  rpc ReadFromChunk(ReadFromChunkRequest) returns (stream ChunkData);
+}
+
+message CreateChunkRequest {
+  uint32 chunkId = 1;
+}
+
+message WriteBlockRequest {
+  uint32 chunkId = 1;
+  uint32 blockIndex = 2;
+  bytes data = 3;
+  fixed32 checksum = 4;
+}
+
+message ReadFromChunkRequest {
+  uint32 chunkId = 1;
+  uint32 rangeStart = 2;
+  uint32 rangeEnd = 3;
+}
+
+message ChunkData {
+  bytes data = 1;
+}
