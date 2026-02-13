@@ -1,6 +1,4 @@
-# DDR
-
-A distributed system written in Go.
+# Distributed Dataset Repository
 
 ## Components
 
