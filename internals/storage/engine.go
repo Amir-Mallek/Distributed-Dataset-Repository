@@ -2,13 +2,22 @@ package storage
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/storage"
 	"go.etcd.io/bbolt"
+	"google.golang.org/protobuf/proto"
+)
+
+const (
+	chunksDirName   = "chunks"
+	metaDbName      = "meta.db"
+	chunksBucket    = "chunks"
+	chunkFileFormat = "chunk_%d.dat"
+	blockSize       = 64 * 1024
 )
 
 var (
@@ -16,43 +25,37 @@ var (
 	ErrChunkAlreadyExists = errors.New("chunk already exists")
 )
 
-// ChunkMeta is what we store in BoltDB as JSON
-type ChunkMeta struct {
-	ChunkID        uint32            `json:"chunk_id"`
-	ClientID       string            `json:"client_id"`  
-	DatasetID      string            `json:"dataset_id"` 
-	FilePath       string            `json:"file_path"`
-	Status         string            `json:"status"` // "Writing" or "Sealed"
-	BlockChecksums map[uint32]uint32 `json:"block_checksums"` // blockIndex -> checksum
-}
-
 type DiskEngine struct {
 	db      *bbolt.DB
 	dataDir string
 }
 
-// NewDiskEngine initializes the DB and base data directory
+func (e *DiskEngine) getFilePath(clientID, datasetID string, chunkID uint32) string {
+	fileName := fmt.Sprintf(chunkFileFormat, chunkID)
+	return filepath.Join(e.dataDir, clientID, datasetID, fileName)
+}
+
+// NewDiskEngine initializes the DB and base directory
 func NewDiskEngine(baseDir string) (*DiskEngine, error) {
-	err := os.MkdirAll(filepath.Join(baseDir, "chunks"), 0755)
-	if err != nil {
+	dataDir := filepath.Join(baseDir, chunksDirName)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
 
-	dbPath := filepath.Join(baseDir, "meta.db")
+	dbPath := filepath.Join(baseDir, metaDbName)
 	db, err := bbolt.Open(dbPath, 0600, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// bucket is a table-like structure in BoltDB
 	err = db.Update(func(tx *bbolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("chunks"))
+		_, err := tx.CreateBucketIfNotExists([]byte(chunksBucket))
 		return err
 	})
 
 	return &DiskEngine{
 		db:      db,
-		dataDir: filepath.Join(baseDir, "chunks"),
+		dataDir: dataDir,
 	}, err
 }
 
@@ -62,10 +65,10 @@ func uint32ToBytes(v uint32) []byte {
 	return b
 }
 
-// CreateChunk builds the sharded directory structure and reserves the DB entry
-func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string) error {
+// CreateChunk: Uses Protobuf binary marshalling
+func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string, totalSize uint64) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("chunks"))
+		b := tx.Bucket([]byte(chunksBucket))
 		key := uint32ToBytes(chunkID)
 
 		if b.Get(key) != nil {
@@ -77,96 +80,107 @@ func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID stri
 			return err
 		}
 
-		filePath := filepath.Join(shardDir, fmt.Sprintf("chunk_%d.dat", chunkID))
-		
-		f, err := os.Create(filePath)
+		f, err := os.Create(e.getFilePath(clientID, datasetID, chunkID))
 		if err != nil {
 			return err
 		}
 		f.Close()
 
-		meta := ChunkMeta{
-			ChunkID:        chunkID,
-			ClientID:       clientID,
-			DatasetID:      datasetID,
-			FilePath:       filePath,
+		meta := &pb.ChunkMetaProto{
+			ChunkId:        chunkID,
+			ClientId:       clientID,
+			DatasetId:      datasetID,
 			Status:         "Writing",
+			TotalSize:      totalSize,
 			BlockChecksums: make(map[uint32]uint32),
 		}
 
-		metaBytes, _ := json.Marshal(meta)
+		metaBytes, err := proto.Marshal(meta)
+		if err != nil {
+			return err
+		}
 		return b.Put(key, metaBytes)
 	})
 }
 
-// WriteBlock executes parallel file I/O and atomic database updates
-func (e *DiskEngine) WriteBlock(chunkID uint32, blockIndex uint32, data []byte, checksum uint32) error {
-	
-	var filePath string
-	err := e.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("chunks"))
-		val := b.Get(uint32ToBytes(chunkID))
-		if val == nil {
-			return ErrChunkNotFound
-		}
-		var meta ChunkMeta
-		if err := json.Unmarshal(val, &meta); err != nil {
-			return err
-		}
-		filePath = meta.FilePath
-		return nil
-	})
-	if err != nil {
-		return err
-	}
+func (e *DiskEngine) WriteBlock(chunkID uint32, blockIndex uint32, data []byte, checksum uint32, filePath string) error {
 
 	f, err := os.OpenFile(filePath, os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	
-	blockSize := int64(64 * 1024)
-	offset := int64(blockIndex) * blockSize
-	
+
+	offset := int64(blockIndex) * int64(blockSize)
 	_, writeErr := f.WriteAt(data, offset)
-	f.Close() 
-	
+	f.Close()
+
 	if writeErr != nil {
 		return writeErr
 	}
 
-	
-	// BoltDB guarantees this block executes sequentially across threads
 	return e.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("chunks"))
+		b := tx.Bucket([]byte(chunksBucket))
 		val := b.Get(uint32ToBytes(chunkID))
-		if val == nil {
-			return ErrChunkNotFound
-		}
-		
-		var meta ChunkMeta
-		if err := json.Unmarshal(val, &meta); err != nil {
+
+		meta := &pb.ChunkMetaProto{}
+		if err := proto.Unmarshal(val, meta); err != nil {
 			return err
 		}
 
-		// Update the checksum for this specific block
 		meta.BlockChecksums[blockIndex] = checksum
-		
-		metaBytes, _ := json.Marshal(meta)
+
+		metaBytes, err := proto.Marshal(meta)
+		if err != nil {
+			return err
+		}
 		return b.Put(uint32ToBytes(chunkID), metaBytes)
 	})
 }
 
-// GetChunkForRead fetches metadata so the gRPC server can stream the file back
-func (e *DiskEngine) GetChunkForRead(chunkID uint32) (ChunkMeta, error) {
-	var meta ChunkMeta
+func (e *DiskEngine) GetChunkForRead(chunkID uint32) (*pb.ChunkMetaProto, error) {
+	meta := &pb.ChunkMetaProto{}
 	err := e.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("chunks"))
+		b := tx.Bucket([]byte(chunksBucket))
 		val := b.Get(uint32ToBytes(chunkID))
 		if val == nil {
 			return ErrChunkNotFound
 		}
-		return json.Unmarshal(val, &meta)
+		return proto.Unmarshal(val, meta)
 	})
 	return meta, err
+}
+
+func (e *DiskEngine) SealChunk(chunkID uint32) error {
+	return e.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(chunksBucket))
+		val := b.Get(uint32ToBytes(chunkID))
+		if val == nil {
+			return ErrChunkNotFound
+		}
+
+		meta := &pb.ChunkMetaProto{}
+		proto.Unmarshal(val, meta)
+
+		expectedBlocks := (meta.TotalSize + blockSize - 1) / blockSize
+
+		if uint32(len(meta.BlockChecksums)) != uint32(expectedBlocks) {
+			return fmt.Errorf("missing blocks: have %d, want %d",
+				len(meta.BlockChecksums), expectedBlocks)
+		}
+
+		filePath := e.getFilePath(meta.ClientId, meta.DatasetId, meta.ChunkId)
+		info, err := os.Stat(filePath)
+		if err != nil {
+			return err
+		}
+
+		if uint64(info.Size()) != meta.TotalSize {
+			return fmt.Errorf("integrity fail: expected %d bytes, got %d",
+				meta.TotalSize, info.Size())
+		}
+
+		meta.Status = "Sealed"
+		metaBytes, _ := proto.Marshal(meta)
+		return b.Put(uint32ToBytes(chunkID), metaBytes)
+	})
 }
