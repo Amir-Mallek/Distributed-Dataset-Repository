@@ -1,4 +1,4 @@
-.PHONY: build clean client master stserver all
+.PHONY: build clean client master stserver all proto proto-generate
 
 # Build all binaries
 all: build
@@ -20,6 +20,19 @@ stserver:
 	@echo "Building stserver..."
 	@mkdir -p bin
 	@go build -o bin/stserver ./cmd/stserver
+
+# Proto file generation
+proto: proto-generate
+
+proto-generate:
+	@echo "Generating proto files..."
+	@protoc \
+		--go_out=. \
+		--go-grpc_out=. \
+		--proto_path=. \
+		api/chunktransfer/chunk_transfer.proto \
+		api/storage/storage.proto
+	@echo "Proto generation complete!"
 
 # Clean build artifacts
 clean:
