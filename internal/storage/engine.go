@@ -30,7 +30,7 @@ type DiskEngine struct {
 	dataDir string
 }
 
-func (e *DiskEngine) getFilePath(clientID, datasetID string, chunkID uint32) string {
+func (e *DiskEngine) GetFilePath(clientID, datasetID string, chunkID uint32) string {
 	fileName := fmt.Sprintf(chunkFileFormat, chunkID)
 	return filepath.Join(e.dataDir, clientID, datasetID, fileName)
 }
@@ -66,7 +66,7 @@ func uint32ToBytes(v uint32) []byte {
 }
 
 // CreateChunk: Uses Protobuf binary marshalling
-func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string, totalSize uint64) error {
+func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string, totalSize uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
 		key := uint32ToBytes(chunkID)
@@ -80,11 +80,11 @@ func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID stri
 			return err
 		}
 
-		f, err := os.Create(e.getFilePath(clientID, datasetID, chunkID))
+		f, err := os.Create(e.GetFilePath(clientID, datasetID, chunkID))
 		if err != nil {
 			return err
 		}
-		f.Close()
+		_ = f.Close()
 
 		meta := &pb.ChunkMetaProto{
 			ChunkId:        chunkID,
@@ -159,7 +159,9 @@ func (e *DiskEngine) SealChunk(chunkID uint32) error {
 		}
 
 		meta := &pb.ChunkMetaProto{}
-		proto.Unmarshal(val, meta)
+		if err := proto.Unmarshal(val, meta); err != nil {
+			return err
+		}
 
 		expectedBlocks := (meta.TotalSize + blockSize - 1) / blockSize
 
@@ -168,19 +170,22 @@ func (e *DiskEngine) SealChunk(chunkID uint32) error {
 				len(meta.BlockChecksums), expectedBlocks)
 		}
 
-		filePath := e.getFilePath(meta.ClientId, meta.DatasetId, meta.ChunkId)
+		filePath := e.GetFilePath(meta.ClientId, meta.DatasetId, meta.ChunkId)
 		info, err := os.Stat(filePath)
 		if err != nil {
 			return err
 		}
 
-		if uint64(info.Size()) != meta.TotalSize {
+		if info.Size() != int64(meta.TotalSize) {
 			return fmt.Errorf("integrity fail: expected %d bytes, got %d",
 				meta.TotalSize, info.Size())
 		}
 
 		meta.Status = "Sealed"
-		metaBytes, _ := proto.Marshal(meta)
+		metaBytes, err := proto.Marshal(meta)
+		if err != nil {
+			return err
+		}
 		return b.Put(uint32ToBytes(chunkID), metaBytes)
 	})
 }

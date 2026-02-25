@@ -5,12 +5,13 @@ go 1.24.0
 toolchain go1.24.6
 
 require (
+	github.com/golang/protobuf v1.5.4
+	go.etcd.io/bbolt v1.4.3
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
 )
 
 require (
-	go.etcd.io/bbolt v1.4.3 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
