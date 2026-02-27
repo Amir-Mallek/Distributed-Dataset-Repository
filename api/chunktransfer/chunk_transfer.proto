@@ -16,7 +16,7 @@ message CreateChunkRequest {
   uint32 chunkId = 1;
   string clientId=2;
   string datasetId=3;
-  uint64 chunkSize=4;
+  uint32 chunkSize=4;
 }
 
 message WriteBlockRequest {

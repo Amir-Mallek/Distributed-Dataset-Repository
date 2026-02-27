@@ -74,7 +74,7 @@ type ChunkMetaProto struct {
 	DatasetId      string                 `protobuf:"bytes,3,opt,name=dataset_id,json=datasetId,proto3" json:"dataset_id,omitempty"`
 	Status         ChunkStatus            `protobuf:"varint,4,opt,name=status,proto3,enum=storage.ChunkStatus" json:"status,omitempty"`
 	TotalSize      uint32                 `protobuf:"varint,5,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
-	BlockChecksums map[uint32]uint32      `protobuf:"bytes,6,rep,name=block_checksums,json=blockChecksums,proto3" json:"block_checksums,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	BlockChecksums []uint32               `protobuf:"varint,6,rep,packed,name=block_checksums,json=blockChecksums,proto3" json:"block_checksums,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -144,7 +144,7 @@ func (x *ChunkMetaProto) GetTotalSize() uint32 {
 	return 0
 }
 
-func (x *ChunkMetaProto) GetBlockChecksums() map[uint32]uint32 {
+func (x *ChunkMetaProto) GetBlockChecksums() []uint32 {
 	if x != nil {
 		return x.BlockChecksums
 	}
@@ -155,7 +155,7 @@ var File_api_metastorage_storage_proto protoreflect.FileDescriptor
 
 const file_api_metastorage_storage_proto_rawDesc = "" +
 	"\n" +
-	"\x1dapi/metastorage/storage.proto\x12\astorage\"\xcd\x02\n" +
+	"\x1dapi/metastorage/storage.proto\x12\astorage\"\xdd\x01\n" +
 	"\x0eChunkMetaProto\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\rR\achunkId\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1d\n" +
@@ -163,11 +163,8 @@ const file_api_metastorage_storage_proto_rawDesc = "" +
 	"dataset_id\x18\x03 \x01(\tR\tdatasetId\x12,\n" +
 	"\x06status\x18\x04 \x01(\x0e2\x14.storage.ChunkStatusR\x06status\x12\x1d\n" +
 	"\n" +
-	"total_size\x18\x05 \x01(\rR\ttotalSize\x12T\n" +
-	"\x0fblock_checksums\x18\x06 \x03(\v2+.storage.ChunkMetaProto.BlockChecksumsEntryR\x0eblockChecksums\x1aA\n" +
-	"\x13BlockChecksumsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\rR\x05value:\x028\x01*&\n" +
+	"total_size\x18\x05 \x01(\rR\ttotalSize\x12'\n" +
+	"\x0fblock_checksums\x18\x06 \x03(\rR\x0eblockChecksums*&\n" +
 	"\vChunkStatus\x12\v\n" +
 	"\aCREATED\x10\x00\x12\n" +
 	"\n" +
@@ -186,20 +183,18 @@ func file_api_metastorage_storage_proto_rawDescGZIP() []byte {
 }
 
 var file_api_metastorage_storage_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_metastorage_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_metastorage_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_api_metastorage_storage_proto_goTypes = []any{
 	(ChunkStatus)(0),       // 0: storage.ChunkStatus
 	(*ChunkMetaProto)(nil), // 1: storage.ChunkMetaProto
-	nil,                    // 2: storage.ChunkMetaProto.BlockChecksumsEntry
 }
 var file_api_metastorage_storage_proto_depIdxs = []int32{
 	0, // 0: storage.ChunkMetaProto.status:type_name -> storage.ChunkStatus
-	2, // 1: storage.ChunkMetaProto.block_checksums:type_name -> storage.ChunkMetaProto.BlockChecksumsEntry
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_api_metastorage_storage_proto_init() }
@@ -213,7 +208,7 @@ func file_api_metastorage_storage_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_metastorage_storage_proto_rawDesc), len(file_api_metastorage_storage_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   2,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

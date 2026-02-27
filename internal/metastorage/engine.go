@@ -76,7 +76,7 @@ func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID stri
 	})
 }
 
-func (e *DiskEngine) SealChunk(chunkID uint32, blockChecksums map[uint32]uint32) error {
+func (e *DiskEngine) SealChunk(chunkID uint32, blockChecksums []uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
 		val := b.Get(uint32ToBytes(chunkID))

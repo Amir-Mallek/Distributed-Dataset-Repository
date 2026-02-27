@@ -15,5 +15,5 @@ message ChunkMetaProto {
     string dataset_id = 3;
     ChunkStatus status = 4;
     uint32 total_size = 5;
-    map<uint32, uint32> block_checksums = 6;
+    repeated uint32 block_checksums = 6;
 }

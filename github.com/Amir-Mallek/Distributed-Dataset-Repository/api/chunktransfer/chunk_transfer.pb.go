@@ -27,7 +27,7 @@ type CreateChunkRequest struct {
 	ChunkId       uint32                 `protobuf:"varint,1,opt,name=chunkId,proto3" json:"chunkId,omitempty"`
 	ClientId      string                 `protobuf:"bytes,2,opt,name=clientId,proto3" json:"clientId,omitempty"`
 	DatasetId     string                 `protobuf:"bytes,3,opt,name=datasetId,proto3" json:"datasetId,omitempty"`
-	ChunkSize     uint64                 `protobuf:"varint,4,opt,name=chunkSize,proto3" json:"chunkSize,omitempty"`
+	ChunkSize     uint32                 `protobuf:"varint,4,opt,name=chunkSize,proto3" json:"chunkSize,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -83,7 +83,7 @@ func (x *CreateChunkRequest) GetDatasetId() string {
 	return ""
 }
 
-func (x *CreateChunkRequest) GetChunkSize() uint64 {
+func (x *CreateChunkRequest) GetChunkSize() uint32 {
 	if x != nil {
 		return x.ChunkSize
 	}
@@ -303,7 +303,7 @@ const file_api_chunktransfer_chunk_transfer_proto_rawDesc = "" +
 	"\achunkId\x18\x01 \x01(\rR\achunkId\x12\x1a\n" +
 	"\bclientId\x18\x02 \x01(\tR\bclientId\x12\x1c\n" +
 	"\tdatasetId\x18\x03 \x01(\tR\tdatasetId\x12\x1c\n" +
-	"\tchunkSize\x18\x04 \x01(\x04R\tchunkSize\"\xb7\x01\n" +
+	"\tchunkSize\x18\x04 \x01(\rR\tchunkSize\"\xb7\x01\n" +
 	"\x11WriteBlockRequest\x12\x18\n" +
 	"\achunkId\x18\x01 \x01(\rR\achunkId\x12\x1a\n" +
 	"\bclientId\x18\x02 \x01(\tR\bclientId\x12\x1c\n" +
