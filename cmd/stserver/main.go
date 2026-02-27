@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	port       = ":50051"
-	storageDir = "chunks"
+	port = ":50051"
 )
 
 func main() {
@@ -22,7 +21,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	server := chunktransfer.NewServer(storageDir)
+	server := chunktransfer.NewServer()
 	pb.RegisterChunkTransferServiceServer(grpcServer, server)
 
 	fmt.Printf("Storage server listening on %s\n", port)
