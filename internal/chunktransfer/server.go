@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunktransfer"
+	pb2 "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/metastorage"
 	st "github.com/Amir-Mallek/Distributed-Dataset-Repository/internal/metastorage"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	maxBlocks     = 1000
+	maxBlocks     = 1024
 	chunkFileSize = 64 * 1024 * 1024 // 64 MB
 )
 
@@ -76,7 +77,7 @@ func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) err
 	var clientID, datasetID string
 	var initialized bool
 	checksums := make([]uint32, maxBlocks)
-	blockCount := uint32(0)
+	blockIndex := uint32(0)
 
 	defer func() {
 		if file != nil {
@@ -87,16 +88,10 @@ func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) err
 	for {
 		block, err := stream.Recv()
 		if err == io.EOF {
-			if file != nil {
-				if err := file.Close(); err != nil {
-					return status.Errorf(codes.Internal, "failed to close chunk file: %v", err)
-				}
-				file = nil
-			}
 			if !initialized {
 				return status.Error(codes.InvalidArgument, "no blocks received")
 			}
-			if err := s.db.SealChunk(chunkID, checksums[:blockCount]); err != nil {
+			if err := s.db.SealChunk(chunkID, checksums); err != nil {
 				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
 			}
 			return stream.SendAndClose(&emptypb.Empty{})
@@ -109,16 +104,16 @@ func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) err
 			chunkID = block.ChunkId
 			clientID = block.ClientId
 			datasetID = block.DatasetId
-			initialized = true
 
 			filePath := s.getFilePath(clientID, datasetID, chunkID)
 			file, err = createChunkFile(filePath)
 			if err != nil {
 				return status.Errorf(codes.Internal, "failed to create chunk file: %v", err)
 			}
+			initialized = true
 		}
 
-		if blockCount >= maxBlocks {
+		if blockIndex >= maxBlocks {
 			return status.Errorf(codes.ResourceExhausted, "exceeded max blocks per chunk (%d)", maxBlocks)
 		}
 
@@ -130,8 +125,8 @@ func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) err
 			return status.Errorf(codes.Internal, "failed to write block: %v", err)
 		}
 
-		checksums[blockCount] = block.Checksum
-		blockCount++
+		checksums[blockIndex] = block.Checksum
+		blockIndex++
 	}
 }
 
@@ -139,6 +134,9 @@ func (s *Server) ReadFromChunk(req *pb.ReadFromChunkRequest, stream pb.ChunkTran
 	meta, err := s.db.GetChunkMetadata(req.ChunkId)
 	if err != nil {
 		return status.Errorf(codes.NotFound, "chunk not found: %v", err)
+	}
+	if meta.Status != pb2.ChunkStatus_SEALED {
+		return status.Error(codes.FailedPrecondition, "chunk is not sealed")
 	}
 
 	filePath := s.getFilePath(meta.ClientId, meta.DatasetId, meta.ChunkId)
@@ -170,17 +168,19 @@ func (s *Server) ReadFromChunk(req *pb.ReadFromChunkRequest, stream pb.ChunkTran
 	remaining := end - start
 
 	for remaining > 0 {
-		toRead := int64(len(buf))
+		toRead := int64(64 * 1024)
 		if toRead > remaining {
 			toRead = remaining
 		}
 
-		n, err := f.Read(buf[:toRead])
-		if n > 0 {
-			if sendErr := stream.Send(&pb.ChunkData{Data: buf[:n]}); sendErr != nil {
+		nbRead, err := f.Read(buf[:toRead])
+		if int64(nbRead) == toRead {
+			if sendErr := stream.Send(&pb.ChunkData{Data: buf[:toRead]}); sendErr != nil {
 				return status.Errorf(codes.Internal, "failed to send data: %v", sendErr)
 			}
-			remaining -= int64(n)
+			remaining -= toRead
+		} else {
+			return status.Errorf(codes.Internal, "failed to read chunk data: expected %d bytes, got %d", toRead, nbRead)
 		}
 
 		if err == io.EOF {

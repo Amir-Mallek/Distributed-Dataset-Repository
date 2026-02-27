@@ -5,8 +5,8 @@ package storage;
 option go_package = "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/metastorage";
 
 enum ChunkStatus{
-    CREATED =0;
-    SEALED=1;
+    CREATED = 0;
+    SEALED = 1;
 }
 
 message ChunkMetaProto {
@@ -15,5 +15,5 @@ message ChunkMetaProto {
     string dataset_id = 3;
     ChunkStatus status = 4;
     uint32 total_size = 5;
-    repeated uint32 block_checksums = 6;
+    repeated fixed32 block_checksums = 6;
 }
