@@ -36,6 +36,7 @@ func NewDiskEngine(baseDir string) (*DiskEngine, error) {
 		return err
 	})
 	if err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -50,7 +51,7 @@ func uint32ToBytes(v uint32) []byte {
 	return b
 }
 
-func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string, totalSize uint64) error {
+func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string, totalSize uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
 		key := uint32ToBytes(chunkID)
@@ -75,7 +76,7 @@ func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID stri
 	})
 }
 
-func (e *DiskEngine) SealChunk(chunkID uint32, blockChecksums []uint32) error {
+func (e *DiskEngine) SealChunk(chunkID uint32, blockChecksums map[uint32]uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
 		val := b.Get(uint32ToBytes(chunkID))
@@ -109,4 +110,8 @@ func (e *DiskEngine) GetChunkMetadata(chunkID uint32) (*pb.ChunkMetaProto, error
 		return nil, err
 	}
 	return meta, nil
+}
+
+func (e *DiskEngine) Close() error {
+	return e.db.Close()
 }

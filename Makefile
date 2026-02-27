@@ -34,7 +34,7 @@ proto-generate:
 		--go-grpc_out=. \
 		--proto_path=. \
 		api/chunktransfer/chunk_transfer.proto \
-		api/storage/storage.proto
+		api/metastorage/storage.proto
 	@echo "Proto generation complete!"
 
 # Clean build artifacts (Linux/macOS)

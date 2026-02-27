@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package storage;
+
+option go_package = "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/metastorage";
+
+enum ChunkStatus{
+    CREATED =0;
+    SEALED=1;
+}
+
+message ChunkMetaProto {
+    uint32 chunk_id = 1;
+    string client_id = 2;
+    string dataset_id = 3;
+    ChunkStatus status = 4;
+    uint32 total_size = 5;
+    map<uint32, uint32> block_checksums = 6;
+}
