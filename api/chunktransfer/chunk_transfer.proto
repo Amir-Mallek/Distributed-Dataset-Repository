@@ -14,19 +14,26 @@ service ChunkTransferService {
 
 message CreateChunkRequest {
   uint32 chunkId = 1;
+  string clientId=2;
+  string datasetId=3;
+  uint32 chunkSize=4;
 }
 
 message WriteBlockRequest {
   uint32 chunkId = 1;
-  uint32 blockIndex = 2;
-  bytes data = 3;
-  fixed32 checksum = 4;
+  string clientId=2;
+  string datasetId=3;
+  uint32 blockIndex = 4;
+  bytes data = 5;
+  fixed32 checksum = 6;
 }
 
 message ReadFromChunkRequest {
   uint32 chunkId = 1;
-  uint32 rangeStart = 2;
-  uint32 rangeEnd = 3;
+  string clientId=2;
+  string datasetId=3;
+  uint32 rangeStart = 4;
+  uint32 rangeEnd = 5;
 }
 
 message ChunkData {

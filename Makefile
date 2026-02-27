@@ -6,7 +6,7 @@
 # Build all binaries
 all: build
 
-build: client master stserver
+build: proto client master stserver
 
 # Build individual components (Linux/macOS)
 client:
@@ -23,6 +23,19 @@ stserver:
 	@echo "Building stserver..."
 	@mkdir -p bin
 	@go build -o bin/stserver ./cmd/stserver
+
+# Proto file generation
+proto: proto-generate
+
+proto-generate:
+	@echo "Generating proto files..."
+	@protoc \
+		--proto_path=. \
+		--go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		api/chunktransfer/chunk_transfer.proto \
+		api/metastorage/storage.proto
+	@echo "Proto generation complete!"
 
 # Clean build artifacts (Linux/macOS)
 clean:
