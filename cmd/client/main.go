@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	chunktransfer "github.com/Amir-Mallek/Distributed-Dataset-Repository/internals/chunktransfer"
+	chunktransfer "github.com/Amir-Mallek/Distributed-Dataset-Repository/internal/chunktransfer"
 )
 
 const serverAddr = "localhost:50051"
