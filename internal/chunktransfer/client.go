@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/crc32"
+	"io"
 
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunktransfer"
 	"google.golang.org/grpc"
@@ -33,7 +34,7 @@ func (c *Client) Close() error {
 }
 
 // SendChunk sends one metadata message followed by block messages.
-func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datasetId string, data []byte) error {
+func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datasetId string, replicaSet []string, data []byte) error {
 	// Open a client-streaming WriteChunk call.
 	stream, err := c.client.WriteChunk(ctx)
 	if err != nil {
@@ -43,9 +44,10 @@ func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datase
 	if err := stream.Send(&pb.WriteChunkRequest{
 		Msg: &pb.WriteChunkRequest_Meta{
 			Meta: &pb.ChunkMetadata{
-				ChunkId:   chunkId,
-				ClientId:  clientId,
-				DatasetId: datasetId,
+				ChunkId:    chunkId,
+				ClientId:   clientId,
+				DatasetId:  datasetId,
+				ReplicaSet: replicaSet,
 			},
 		},
 	}); err != nil {
@@ -80,4 +82,30 @@ func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datase
 		return fmt.Errorf("CloseAndRecv failed: %w", err)
 	}
 	return nil
+}
+
+// ReadChunk reads a byte range from a chunk and returns the streamed bytes.
+func (c *Client) ReadFromChunk(ctx context.Context, chunkID uint32, rangeStart uint32, rangeEnd uint32) ([]byte, error) {
+	stream, err := c.client.ReadFromChunk(ctx, &pb.ReadFromChunkRequest{
+		ChunkId:    chunkID,
+		RangeStart: rangeStart,
+		RangeEnd:   rangeEnd,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ReadFromChunk failed: %w", err)
+	}
+
+	result := make([]byte, 0, int(rangeEnd-rangeStart))
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read stream failed: %w", err)
+		}
+		result = append(result, msg.Data...)
+	}
+
+	return result, nil
 }
