@@ -1,7 +1,6 @@
 package chunktransfer
 
 import (
-	"context"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -64,33 +63,38 @@ func createChunkFile(path string) (*os.File, error) {
 	return f, nil
 }
 
-func (s *Server) CreateChunk(ctx context.Context, req *pb.CreateChunkRequest) (*emptypb.Empty, error) {
-	if err := s.db.CreateChunk(req.ChunkId, req.ClientId, req.DatasetId, req.ChunkSize); err != nil {
+// todo : make error messages more descriptive
+func (s *Server) createChunk(clientID, datasetID string, chunkID uint32) (*os.File, error) {
+	if err := s.db.CreateChunk(chunkID, clientID, datasetID, chunkFileSize); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create chunk: %v", err)
 	}
-	return &emptypb.Empty{}, nil
+	filePath := s.getFilePath(clientID, datasetID, chunkID)
+	file, err := createChunkFile(filePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create chunk file: %v", err)
+	}
+	return file, nil
 }
 
-func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) error {
-	var file *os.File
-	var chunkID uint32
-	var clientID, datasetID string
-	var initialized bool
+func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) error {
 	checksums := make([]uint32, maxBlocks)
 	blockIndex := uint32(0)
 
-	defer func() {
-		if file != nil {
-			_ = file.Close()
-		}
-	}()
+	block, err := stream.Recv()
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to receive first block: %v", err)
+	}
+	chunkID := block.ChunkId
+	clientID := block.ClientId
+	datasetID := block.DatasetId
+	file, err := s.createChunk(clientID, datasetID, chunkID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to create chunk file: %v", err)
+	}
+	defer file.Close()
 
 	for {
-		block, err := stream.Recv()
 		if err == io.EOF {
-			if !initialized {
-				return status.Error(codes.InvalidArgument, "no blocks received")
-			}
 			if err := s.db.SealChunk(chunkID, checksums); err != nil {
 				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
 			}
@@ -98,19 +102,6 @@ func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) err
 		}
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to receive block: %v", err)
-		}
-
-		if !initialized {
-			chunkID = block.ChunkId
-			clientID = block.ClientId
-			datasetID = block.DatasetId
-
-			filePath := s.getFilePath(clientID, datasetID, chunkID)
-			file, err = createChunkFile(filePath)
-			if err != nil {
-				return status.Errorf(codes.Internal, "failed to create chunk file: %v", err)
-			}
-			initialized = true
 		}
 
 		if blockIndex >= maxBlocks {
@@ -127,6 +118,8 @@ func (s *Server) WriteBlock(stream pb.ChunkTransferService_WriteBlockServer) err
 
 		checksums[blockIndex] = block.Checksum
 		blockIndex++
+
+		block, err = stream.Recv()
 	}
 }
 

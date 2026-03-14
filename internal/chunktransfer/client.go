@@ -35,14 +35,8 @@ func (c *Client) Close() error {
 // SendChunk sends all data as a single chunk identified by chunkId.
 // It first creates the chunk on the server, then streams the data as blocks.
 func (c *Client) SendChunk(ctx context.Context, chunkId uint32, data []byte) error {
-	// Step 1: Tell the server to create a new chunk
-	_, err := c.client.CreateChunk(ctx, &pb.CreateChunkRequest{ChunkId: chunkId})
-	if err != nil {
-		return fmt.Errorf("CreateChunk failed: %w", err)
-	}
-
 	// Step 2: Open a client-streaming WriteBlock call
-	stream, err := c.client.WriteBlock(ctx)
+	stream, err := c.client.WriteChunk(ctx)
 	if err != nil {
 		return fmt.Errorf("WriteBlock stream open failed: %w", err)
 	}
