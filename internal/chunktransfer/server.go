@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	maxBlocks     = 1024
-	chunkFileSize = 64 * 1024 * 1024 // 64 MB
+	maxBlocks      = 1024
+	chunkFileSize  = 64 * 1024 * 1024 // 64 MB
+	defaultBaseDir = "chunks"
 )
 
 type Server struct {
@@ -27,6 +28,10 @@ type Server struct {
 }
 
 func NewServer(baseDir string) (*Server, error) {
+	if baseDir == "" {
+		baseDir = defaultBaseDir
+	}
+
 	db, err := st.NewDiskEngine(baseDir)
 	if err != nil {
 		return nil, err
@@ -55,11 +60,6 @@ func createChunkFile(path string) (*os.File, error) {
 		_ = f.Close()
 		return nil, err
 	}
-	// Seek back to start for writing
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
 	return f, nil
 }
 
@@ -77,36 +77,62 @@ func (s *Server) createChunk(clientID, datasetID string, chunkID uint32) (*os.Fi
 }
 
 func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) error {
-	checksums := make([]uint32, maxBlocks)
-	blockIndex := uint32(0)
-
-	block, err := stream.Recv()
+	req, err := stream.Recv()
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to receive first block: %v", err)
+		return status.Errorf(codes.Internal, "failed to receive metadata: %v", err)
 	}
-	chunkID := block.ChunkId
-	clientID := block.ClientId
-	datasetID := block.DatasetId
+
+	metaMsg, ok := req.Msg.(*pb.WriteChunkRequest_Meta)
+	if !ok {
+		return status.Error(codes.InvalidArgument, "first message must be chunk metadata")
+	}
+	meta := metaMsg.Meta
+
+	checksums := make([]uint32, maxBlocks)
+	chunkID := meta.ChunkId
+	clientID := meta.ClientId
+	datasetID := meta.DatasetId
+
+	forwarder, err := s.NewForwarder(stream.Context(), meta)
+	if err != nil {
+		return err
+	}
+	if forwarder != nil {
+		defer forwarder.Abort()
+	}
+
 	file, err := s.createChunk(clientID, datasetID, chunkID)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to create chunk file: %v", err)
 	}
 	defer file.Close()
 
+	blockCount := 0
 	for {
+		msg, err := stream.Recv()
 		if err == io.EOF {
 			if err := s.db.SealChunk(chunkID, checksums); err != nil {
 				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
+			}
+			if forwarder != nil {
+				if err := forwarder.CloseAndWait(); err != nil {
+					return err
+				}
 			}
 			return stream.SendAndClose(&emptypb.Empty{})
 		}
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to receive block: %v", err)
 		}
-
-		if blockIndex >= maxBlocks {
+		if blockCount >= maxBlocks {
 			return status.Errorf(codes.ResourceExhausted, "exceeded max blocks per chunk (%d)", maxBlocks)
 		}
+
+		blockMsg, ok := msg.Msg.(*pb.WriteChunkRequest_Block)
+		if !ok || blockMsg.Block == nil {
+			return status.Error(codes.InvalidArgument, "only block messages are allowed after metadata")
+		}
+		block := blockMsg.Block
 
 		if !verifyChecksum(block.Data, block.Checksum) {
 			return status.Error(codes.DataLoss, "checksum mismatch for block")
@@ -116,10 +142,14 @@ func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) err
 			return status.Errorf(codes.Internal, "failed to write block: %v", err)
 		}
 
-		checksums[blockIndex] = block.Checksum
-		blockIndex++
+		if forwarder != nil {
+			if err := forwarder.Send(block); err != nil {
+				return err
+			}
+		}
 
-		block, err = stream.Recv()
+		checksums[blockCount] = block.Checksum
+		blockCount++
 	}
 }
 
@@ -165,10 +195,11 @@ func (s *Server) ReadFromChunk(req *pb.ReadFromChunkRequest, stream pb.ChunkTran
 		if toRead > remaining {
 			toRead = remaining
 		}
+		readSize := int(toRead)
 
-		nbRead, err := f.Read(buf[:toRead])
+		nbRead, err := f.Read(buf[:readSize])
 		if int64(nbRead) == toRead {
-			if sendErr := stream.Send(&pb.ChunkData{Data: buf[:toRead]}); sendErr != nil {
+			if sendErr := stream.Send(&pb.ChunkData{Data: buf[:readSize]}); sendErr != nil {
 				return status.Errorf(codes.Internal, "failed to send data: %v", sendErr)
 			}
 			remaining -= toRead

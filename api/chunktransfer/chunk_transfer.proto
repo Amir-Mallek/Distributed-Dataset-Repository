@@ -7,17 +7,27 @@ package chunktransfer;
 import "google/protobuf/empty.proto";
 
 service ChunkTransferService {
-  rpc WriteChunk(stream WriteBlockRequest) returns (google.protobuf.Empty);
+  rpc WriteChunk(stream WriteChunkRequest) returns (google.protobuf.Empty);
   rpc ReadFromChunk(ReadFromChunkRequest) returns (stream ChunkData);
 }
 
-message WriteBlockRequest {
+message WriteChunkRequest {
+  oneof msg {
+    ChunkMetadata meta = 1;
+    ChunkBlock block = 2;
+  }
+}
+
+message ChunkMetadata {
   uint32 chunkId = 1;
-  string clientId=2;
-  string datasetId=3;
-  uint32 blockIndex = 4;
-  bytes data = 5;
-  fixed32 checksum = 6;
+  string clientId = 2;
+  string datasetId = 3;
+  repeated string replicaSet = 4;
+}
+
+message ChunkBlock {
+  bytes data = 2;
+  fixed32 checksum = 3;
 }
 
 message ReadFromChunkRequest {

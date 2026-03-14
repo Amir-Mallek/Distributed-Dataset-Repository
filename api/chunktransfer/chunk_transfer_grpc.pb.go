@@ -28,7 +28,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChunkTransferServiceClient interface {
-	WriteChunk(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteBlockRequest, emptypb.Empty], error)
+	WriteChunk(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteChunkRequest, emptypb.Empty], error)
 	ReadFromChunk(ctx context.Context, in *ReadFromChunkRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChunkData], error)
 }
 
@@ -40,18 +40,18 @@ func NewChunkTransferServiceClient(cc grpc.ClientConnInterface) ChunkTransferSer
 	return &chunkTransferServiceClient{cc}
 }
 
-func (c *chunkTransferServiceClient) WriteChunk(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteBlockRequest, emptypb.Empty], error) {
+func (c *chunkTransferServiceClient) WriteChunk(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteChunkRequest, emptypb.Empty], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ChunkTransferService_ServiceDesc.Streams[0], ChunkTransferService_WriteChunk_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[WriteBlockRequest, emptypb.Empty]{ClientStream: stream}
+	x := &grpc.GenericClientStream[WriteChunkRequest, emptypb.Empty]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ChunkTransferService_WriteChunkClient = grpc.ClientStreamingClient[WriteBlockRequest, emptypb.Empty]
+type ChunkTransferService_WriteChunkClient = grpc.ClientStreamingClient[WriteChunkRequest, emptypb.Empty]
 
 func (c *chunkTransferServiceClient) ReadFromChunk(ctx context.Context, in *ReadFromChunkRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChunkData], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -76,7 +76,7 @@ type ChunkTransferService_ReadFromChunkClient = grpc.ServerStreamingClient[Chunk
 // All implementations must embed UnimplementedChunkTransferServiceServer
 // for forward compatibility.
 type ChunkTransferServiceServer interface {
-	WriteChunk(grpc.ClientStreamingServer[WriteBlockRequest, emptypb.Empty]) error
+	WriteChunk(grpc.ClientStreamingServer[WriteChunkRequest, emptypb.Empty]) error
 	ReadFromChunk(*ReadFromChunkRequest, grpc.ServerStreamingServer[ChunkData]) error
 	mustEmbedUnimplementedChunkTransferServiceServer()
 }
@@ -88,7 +88,7 @@ type ChunkTransferServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedChunkTransferServiceServer struct{}
 
-func (UnimplementedChunkTransferServiceServer) WriteChunk(grpc.ClientStreamingServer[WriteBlockRequest, emptypb.Empty]) error {
+func (UnimplementedChunkTransferServiceServer) WriteChunk(grpc.ClientStreamingServer[WriteChunkRequest, emptypb.Empty]) error {
 	return status.Error(codes.Unimplemented, "method WriteChunk not implemented")
 }
 func (UnimplementedChunkTransferServiceServer) ReadFromChunk(*ReadFromChunkRequest, grpc.ServerStreamingServer[ChunkData]) error {
@@ -116,11 +116,11 @@ func RegisterChunkTransferServiceServer(s grpc.ServiceRegistrar, srv ChunkTransf
 }
 
 func _ChunkTransferService_WriteChunk_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ChunkTransferServiceServer).WriteChunk(&grpc.GenericServerStream[WriteBlockRequest, emptypb.Empty]{ServerStream: stream})
+	return srv.(ChunkTransferServiceServer).WriteChunk(&grpc.GenericServerStream[WriteChunkRequest, emptypb.Empty]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ChunkTransferService_WriteChunkServer = grpc.ClientStreamingServer[WriteBlockRequest, emptypb.Empty]
+type ChunkTransferService_WriteChunkServer = grpc.ClientStreamingServer[WriteChunkRequest, emptypb.Empty]
 
 func _ChunkTransferService_ReadFromChunk_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ReadFromChunkRequest)

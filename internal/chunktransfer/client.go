@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/crc32"
+	"io"
 
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunktransfer"
 	"google.golang.org/grpc"
@@ -32,16 +33,28 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-// SendChunk sends all data as a single chunk identified by chunkId.
-// It first creates the chunk on the server, then streams the data as blocks.
-func (c *Client) SendChunk(ctx context.Context, chunkId uint32, data []byte) error {
-	// Step 2: Open a client-streaming WriteBlock call
+// SendChunk sends one metadata message followed by block messages.
+func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datasetId string, replicaSet []string, data []byte) error {
+	// Open a client-streaming WriteChunk call.
 	stream, err := c.client.WriteChunk(ctx)
 	if err != nil {
-		return fmt.Errorf("WriteBlock stream open failed: %w", err)
+		return fmt.Errorf("WriteChunk stream open failed: %w", err)
 	}
 
-	// Step 3: Split data into fixed-size blocks and stream them
+	if err := stream.Send(&pb.WriteChunkRequest{
+		Msg: &pb.WriteChunkRequest_Meta{
+			Meta: &pb.ChunkMetadata{
+				ChunkId:    chunkId,
+				ClientId:   clientId,
+				DatasetId:  datasetId,
+				ReplicaSet: replicaSet,
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to send chunk metadata: %w", err)
+	}
+
+	// Split data into fixed-size blocks and stream them.
 	blockIndex := uint32(0)
 	for offset := 0; offset < len(data); offset += blockSize {
 		end := offset + blockSize
@@ -50,11 +63,13 @@ func (c *Client) SendChunk(ctx context.Context, chunkId uint32, data []byte) err
 		}
 		block := data[offset:end]
 
-		err := stream.Send(&pb.WriteBlockRequest{
-			ChunkId:    chunkId,
-			BlockIndex: blockIndex,
-			Data:       block,
-			Checksum:   crc32.ChecksumIEEE(block),
+		err := stream.Send(&pb.WriteChunkRequest{
+			Msg: &pb.WriteChunkRequest_Block{
+				Block: &pb.ChunkBlock{
+					Data:     block,
+					Checksum: crc32.ChecksumIEEE(block),
+				},
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to send block %d: %w", blockIndex, err)
@@ -62,9 +77,35 @@ func (c *Client) SendChunk(ctx context.Context, chunkId uint32, data []byte) err
 		blockIndex++
 	}
 
-	// Step 4: Close the stream and wait for the server's acknowledgement
+	// Close the stream and wait for the server acknowledgement.
 	if _, err := stream.CloseAndRecv(); err != nil {
 		return fmt.Errorf("CloseAndRecv failed: %w", err)
 	}
 	return nil
+}
+
+// ReadChunk reads a byte range from a chunk and returns the streamed bytes.
+func (c *Client) ReadFromChunk(ctx context.Context, chunkID uint32, rangeStart uint32, rangeEnd uint32) ([]byte, error) {
+	stream, err := c.client.ReadFromChunk(ctx, &pb.ReadFromChunkRequest{
+		ChunkId:    chunkID,
+		RangeStart: rangeStart,
+		RangeEnd:   rangeEnd,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ReadFromChunk failed: %w", err)
+	}
+
+	result := make([]byte, 0, int(rangeEnd-rangeStart))
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read stream failed: %w", err)
+		}
+		result = append(result, msg.Data...)
+	}
+
+	return result, nil
 }
