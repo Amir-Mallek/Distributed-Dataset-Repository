@@ -78,22 +78,35 @@ func (s *Server) createChunk(clientID, datasetID string, chunkID uint32) (*os.Fi
 
 func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) error {
 	checksums := make([]uint32, maxBlocks)
-	blockIndex := uint32(0)
-
-	block, err := stream.Recv()
+	msg, err := stream.Recv()
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to receive first block: %v", err)
+		if err == io.EOF {
+			return status.Error(codes.InvalidArgument, "empty stream: metadata is required")
+		}
+		return status.Errorf(codes.Internal, "failed to receive metadata: %v", err)
 	}
-	chunkID := block.ChunkId
-	clientID := block.ClientId
-	datasetID := block.DatasetId
+
+	metaMsg, ok := msg.Msg.(*pb.WriteChunkRequest_Meta)
+	if !ok || metaMsg.Meta == nil {
+		return status.Error(codes.InvalidArgument, "first message must be chunk metadata")
+	}
+
+	chunkID := metaMsg.Meta.ChunkId
+	clientID := metaMsg.Meta.ClientId
+	datasetID := metaMsg.Meta.DatasetId
+	if clientID == "" || datasetID == "" {
+		return status.Error(codes.InvalidArgument, "clientId and datasetId are required in metadata")
+	}
+
 	file, err := s.createChunk(clientID, datasetID, chunkID)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to create chunk file: %v", err)
 	}
 	defer file.Close()
 
+	blockCount := uint32(0)
 	for {
+		msg, err := stream.Recv()
 		if err == io.EOF {
 			if err := s.db.SealChunk(chunkID, checksums); err != nil {
 				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
@@ -103,10 +116,15 @@ func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) err
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to receive block: %v", err)
 		}
-
-		if blockIndex >= maxBlocks {
+		if blockCount+1 == maxBlocks {
 			return status.Errorf(codes.ResourceExhausted, "exceeded max blocks per chunk (%d)", maxBlocks)
 		}
+
+		blockMsg, ok := msg.Msg.(*pb.WriteChunkRequest_Block)
+		if !ok || blockMsg.Block == nil {
+			return status.Error(codes.InvalidArgument, "only block messages are allowed after metadata")
+		}
+		block := blockMsg.Block
 
 		if !verifyChecksum(block.Data, block.Checksum) {
 			return status.Error(codes.DataLoss, "checksum mismatch for block")
@@ -116,10 +134,8 @@ func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) err
 			return status.Errorf(codes.Internal, "failed to write block: %v", err)
 		}
 
-		checksums[blockIndex] = block.Checksum
-		blockIndex++
-
-		block, err = stream.Recv()
+		checksums[blockCount] = block.Checksum
+		blockCount++
 	}
 }
 
