@@ -33,15 +33,15 @@ func (c *Client) Close() error {
 }
 
 // SendChunk sends all data as a single chunk identified by chunkId.
-// It first creates the chunk on the server, then streams the data as blocks.
-func (c *Client) SendChunk(ctx context.Context, chunkId uint32, data []byte) error {
-	// Step 2: Open a client-streaming WriteBlock call
+// It streams the data as 1 MB blocks, carrying clientId and datasetId on every block.
+func (c *Client) SendChunk(ctx context.Context, clientId, datasetId string, chunkId uint32, data []byte) error {
+	// Step 1: Open a client-streaming WriteChunk call
 	stream, err := c.client.WriteChunk(ctx)
 	if err != nil {
-		return fmt.Errorf("WriteBlock stream open failed: %w", err)
+		return fmt.Errorf("WriteChunk stream open failed: %w", err)
 	}
 
-	// Step 3: Split data into fixed-size blocks and stream them
+	// Step 2: Split data into fixed-size blocks and stream them
 	blockIndex := uint32(0)
 	for offset := 0; offset < len(data); offset += blockSize {
 		end := offset + blockSize
@@ -52,6 +52,8 @@ func (c *Client) SendChunk(ctx context.Context, chunkId uint32, data []byte) err
 
 		err := stream.Send(&pb.WriteBlockRequest{
 			ChunkId:    chunkId,
+			ClientId:   clientId,
+			DatasetId:  datasetId,
 			BlockIndex: blockIndex,
 			Data:       block,
 			Checksum:   crc32.ChecksumIEEE(block),

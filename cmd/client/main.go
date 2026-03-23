@@ -12,11 +12,14 @@ import (
 const serverAddr = "localhost:50051"
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatalf("Usage: client <file path>")
+	if len(os.Args) < 4 {
+		log.Fatalf("Usage: client <client id> <dataset id> <file path>")
 	}
 
-	filePath := os.Args[1]
+	clientId := os.Args[1]
+	datasetId := os.Args[2]
+	filePath := os.Args[3]
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		log.Fatalf("failed to read file: %v", err)
@@ -31,7 +34,7 @@ func main() {
 	chunkId := uint32(1)
 	fmt.Printf("Sending file %q as chunk %d (%d bytes) to %s...\n", filePath, chunkId, len(data), serverAddr)
 
-	if err := client.SendChunk(context.Background(), chunkId, data); err != nil {
+	if err := client.SendChunk(context.Background(), clientId, datasetId, chunkId, data); err != nil {
 		log.Fatalf("failed to send chunk: %v", err)
 	}
 
