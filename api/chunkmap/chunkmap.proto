@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package chunkmap;
+
+option go_package = "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunkmap";
+
+import "google/protobuf/timestamp.proto";
+
+enum ChunkStatus {
+  PENDING    = 0; // record created, no server assigned yet
+  UPLOADING  = 1; // servers assigned, write in progress
+  SEALED     = 2; // all replicas confirmed, chunk is readable
+  CORRUPTED  = 3; // all confirmed replicas lost
+}
+
+message ChunkRecord {
+  // Identity
+  uint32 chunk_id    = 1;
+  string client_id   = 2;
+  string dataset_id  = 3;
+  uint32 chunk_index = 4; // position of this chunk within the full dataset
+
+  // Server locations
+  repeated string replicas            = 5; // all servers assigned to hold this chunk
+  string          primary_server      = 6; // server that accepts the write stream
+  repeated string confirmed_replicas  = 7; // servers that acknowledged successful persistence
+
+  // Lifecycle
+  ChunkStatus               status          = 8;
+  google.protobuf.Timestamp upload_deadline = 9; // if still UPLOADING past this → stale
+
+  // Concurrency control (active_readers is in-memory only; not restored on restart)
+  int32 active_readers = 10;
+  bool  write_locked   = 11;
+
+  // Data integrity
+  uint32          actual_size      = 12; // real bytes written (≤ 64 MB)
+  repeated fixed32 block_checksums = 13; // CRC32 per 1 MB block
+  uint64          version          = 14; // monotonic counter, incremented on every mutation
+
+  // Timestamps
+  google.protobuf.Timestamp created_at       = 15;
+  google.protobuf.Timestamp sealed_at        = 16;
+  google.protobuf.Timestamp last_accessed_at = 17;
+}
+
