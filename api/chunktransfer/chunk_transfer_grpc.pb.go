@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v6.30.2
-// source: chunktransfer/chunk_transfer.proto
+// source: api/chunktransfer/chunk_transfer.proto
 
 package chunktransfer
 
@@ -152,5 +152,5 @@ var ChunkTransferService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "chunktransfer/chunk_transfer.proto",
+	Metadata: "api/chunktransfer/chunk_transfer.proto",
 }
