@@ -3,6 +3,7 @@ package metastorage
 import (
 	"encoding/binary"
 	"errors"
+	"os"
 	"path/filepath"
 
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/metastorage"
@@ -25,6 +26,9 @@ type DiskEngine struct {
 }
 
 func NewDiskEngine(baseDir string) (*DiskEngine, error) {
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return nil, err
+	}
 	dbPath := filepath.Join(baseDir, metaDbName)
 	db, err := bbolt.Open(dbPath, 0600, nil)
 	if err != nil {

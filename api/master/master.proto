@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package master;
+
+option go_package = "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/master";
+
+import "api/chunkmap/chunkmap.proto";
+import "google/protobuf/empty.proto";
+
+service MasterService {
+  // Register a brand-new chunk before any server is assigned.
+  rpc InsertChunk(InsertChunkRequest) returns (google.protobuf.Empty);
+
+  // Tell the master which storage servers will hold this chunk.
+  rpc AssignReplicas(AssignReplicasRequest) returns (google.protobuf.Empty);
+
+  // A storage server reports it has successfully persisted the chunk.
+  rpc ConfirmReplica(ConfirmReplicaRequest) returns (google.protobuf.Empty);
+
+  // Mark the chunk as fully written and readable.
+  rpc SealChunk(SealChunkRequest) returns (google.protobuf.Empty);
+
+  // Fetch the full record for a chunk.
+  rpc GetChunk(ChunkRequest) returns (chunkmap.ChunkRecord);
+
+  // Get the list of servers that hold a sealed chunk (for read routing).
+  rpc GetServers(ChunkRequest) returns (GetServersResponse);
+
+  // Increment the active-reader counter so the chunk cannot be deleted mid-read.
+  rpc AcquireReadLock(ChunkRequest) returns (google.protobuf.Empty);
+
+  // Decrement the active-reader counter.
+  rpc ReleaseReadLock(ChunkRequest) returns (google.protobuf.Empty);
+
+  // Report that a server has lost its copy; triggers CORRUPTED if none remain.
+  rpc MarkCorrupted(MarkCorruptedRequest) returns (google.protobuf.Empty);
+
+  // Remove the chunk record entirely (blocked while readers are active).
+  rpc DeleteChunk(ChunkRequest) returns (google.protobuf.Empty);
+}
+
+// ── Request messages ──────────────────────────────────────────────────────────
+
+message InsertChunkRequest {
+  uint32 chunk_id    = 1;
+  string client_id   = 2;
+  string dataset_id  = 3;
+  uint32 chunk_index = 4;
+}
+
+message AssignReplicasRequest {
+  uint32          chunk_id = 1;
+  repeated string servers  = 2; // all servers that should hold this chunk
+  string          primary  = 3; // server that accepts the write stream
+}
+
+message ConfirmReplicaRequest {
+  uint32 chunk_id    = 1;
+  string server_addr = 2;
+}
+
+message SealChunkRequest {
+  uint32          chunk_id        = 1;
+  uint32          actual_size     = 2;
+  repeated fixed32 block_checksums = 3;
+}
+
+// ChunkRequest is the common single-field request used by GetChunk,
+// GetServers, AcquireReadLock, ReleaseReadLock, and DeleteChunk.
+message ChunkRequest {
+  uint32 chunk_id = 1;
+}
+
+message MarkCorruptedRequest {
+  uint32 chunk_id    = 1;
+  string server_addr = 2;
+}
+
+// ── Response messages ─────────────────────────────────────────────────────────
+
+message GetServersResponse {
+  repeated string servers = 1;
+}
+

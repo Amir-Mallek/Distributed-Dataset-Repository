@@ -12,11 +12,14 @@ import (
 const serverAddr = "localhost:50051"
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatalf("Usage: client <file path>")
+	if len(os.Args) < 4 {
+		log.Fatalf("Usage: client <client id> <dataset id> <file path>")
 	}
 
-	filePath := os.Args[1]
+	clientId := os.Args[1]
+	datasetId := os.Args[2]
+	filePath := os.Args[3]
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		log.Fatalf("failed to read file: %v", err)
