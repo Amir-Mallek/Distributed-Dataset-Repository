@@ -1,0 +1,18 @@
+FROM golang:1.24 AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/master ./cmd/master
+
+FROM gcr.io/distroless/base-debian12
+
+WORKDIR /app
+
+COPY --from=builder /out/master /app/master
+
+ENTRYPOINT ["/app/master"]

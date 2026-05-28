@@ -1,0 +1,21 @@
+services:
+  storage:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: ddr-storage
+    ports:
+      - "50051:50051"
+    volumes:
+      - storage-data:/app/chunks
+
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    container_name: ddr-master
+    profiles:
+      - master
+
+volumes:
+  storage-data:
