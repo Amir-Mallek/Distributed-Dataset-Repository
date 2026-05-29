@@ -10,7 +10,7 @@ enum ChunkStatus{
 }
 
 message ChunkMetaProto {
-    uint32 chunk_id = 1;
+    string chunk_id = 1;
     string client_id = 2;
     string dataset_id = 3;
     ChunkStatus status = 4;

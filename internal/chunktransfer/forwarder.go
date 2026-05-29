@@ -78,11 +78,18 @@ func (f *AsyncForwarder) Abort() {
 }
 
 func (s *Server) NewForwarder(ctx context.Context, meta *pb.ChunkMetadata) (*AsyncForwarder, error) {
-	nextAddr := meta.ReplicaSet[0]
-	remaining := meta.ReplicaSet[1:]
-	if len(remaining) == 0 {
+	selfIdx := -1
+	for i, addr := range meta.ReplicaSet {
+		if addr == s.selfAddr {
+			selfIdx = i
+			break
+		}
+	}
+	if selfIdx == -1 || selfIdx+1 >= len(meta.ReplicaSet) {
 		return nil, nil
 	}
+	nextAddr := meta.ReplicaSet[selfIdx+1]
+	remaining := meta.ReplicaSet[selfIdx+1:]
 
 	conn, err := grpc.NewClient(nextAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

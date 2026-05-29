@@ -15,4 +15,4 @@ WORKDIR /app
 
 COPY --from=builder /out/master /app/master
 
-ENTRYPOINT ["/app/master"]
+ENTRYPOINT ["/app/master", "serve"]

@@ -1,6 +1,9 @@
 package master
 
-import "errors"
+import (
+	"errors"
+	"sync"
+)
 
 type StorageNode struct {
 	ID      string
@@ -13,6 +16,7 @@ type Distributor interface {
 }
 
 type RoundRobinDistributor struct {
+	mu      sync.Mutex
 	nodes   []StorageNode
 	lastIdx int
 }
@@ -21,7 +25,23 @@ func NewRoundRobinDistributor(nodes []StorageNode) *RoundRobinDistributor {
 	return &RoundRobinDistributor{nodes: nodes}
 }
 
+// AddOrUpdateNode adds a node or updates its status/address.
+func (d *RoundRobinDistributor) AddOrUpdateNode(node StorageNode) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range d.nodes {
+		if d.nodes[i].ID == node.ID {
+			d.nodes[i] = node
+			return
+		}
+	}
+	d.nodes = append(d.nodes, node)
+}
+
 func (d *RoundRobinDistributor) SelectServers(count int, exclude []string) ([]StorageNode, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	excludeMap := make(map[string]bool)
 	for _, id := range exclude {
 		excludeMap[id] = true

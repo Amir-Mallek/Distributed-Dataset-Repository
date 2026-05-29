@@ -1,5 +1,4 @@
 package client
-package client
 
 import (
 	"context"
@@ -9,17 +8,33 @@ import (
 	"path/filepath"
 
 	masterpb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/master"
+	chunktransfer "github.com/Amir-Mallek/Distributed-Dataset-Repository/internal/chunktransfer"
 )
 
 const (
-	DefaultChunkSize = 64 * 1024 * 1024 
+	DefaultChunkSize = 64 * 1024 * 1024
 )
 
-type FileUploader struct {
-	masterClient masterpb.MasterServiceClient
+func composeHostAddress(addr string) string {
+	switch addr {
+	case "storage1:50051":
+		return "localhost:50052"
+	case "storage2:50051":
+		return "localhost:50053"
+	case "storage3:50051":
+		return "localhost:50054"
+	case "storage4:50051":
+		return "localhost:50055"
+	default:
+		return addr
+	}
 }
 
-func NewFileUploader(mc masterpb.MasterServiceClient) *FileUploader {
+type FileUploader struct {
+	masterClient masterpb.ClientServiceClient
+}
+
+func NewFileUploader(mc masterpb.ClientServiceClient) *FileUploader {
 	return &FileUploader{masterClient: mc}
 }
 
@@ -39,34 +54,55 @@ func (u *FileUploader) UploadFile(ctx context.Context, localPath string) error {
 	totalSize := stat.Size()
 	numChunks := (totalSize + DefaultChunkSize - 1) / DefaultChunkSize
 
+	// Create dataset on master
+	dsResp, err := u.masterClient.CreateDataset(ctx, &masterpb.CreateDatasetRequest{Name: fileName, ClientId: "client-1"})
+	if err != nil {
+		return fmt.Errorf("failed to create dataset: %w", err)
+	}
+	datasetID := dsResp.DatasetId
+	fmt.Printf("Created dataset %s (id=%s)\n", fileName, datasetID)
 
 	for i := uint32(0); i < uint32(numChunks); i++ {
-		servers, err := u.getServersForChunk(ctx, fileName, i)
-		if err != nil {
-			return fmt.Errorf("chunk %d: master failed: %w", i, err)
-		}
-
 		offset := int64(i) * DefaultChunkSize
 		chunkData := make([]byte, DefaultChunkSize)
 		n, err := file.ReadAt(chunkData, offset)
 		if err != nil && err != io.EOF {
 			return err
 		}
-		
+
 		finalData := chunkData[:n]
 
-		
-		// TODO: call the stserver gRPC 
-		// to actually transfer finalData to servers.ServerAddresses
+		// Request chunk id and replicas from master
+		reqResp, err := u.masterClient.RequestChunkWrite(ctx, &masterpb.RequestChunkWriteRequest{DatasetId: datasetID, ChunkIndex: i, ReplicationFactor: 3})
+		if err != nil {
+			return fmt.Errorf("failed to request chunk write for chunk %d: %w", i, err)
+		}
+
+		chunkID := reqResp.ChunkId
+		// collect replica addresses
+		var replicaAddrs []string
+		for _, r := range reqResp.Replicas {
+			if r != nil && r.Address != "" {
+				replicaAddrs = append(replicaAddrs, r.Address)
+			}
+		}
+		fmt.Printf("Uploading chunk %d -> chunkID=%s to replica %v\n", i, chunkID, replicaAddrs)
+		if len(replicaAddrs) == 0 {
+			return fmt.Errorf("no replica addresses returned for chunk %d", i)
+		}
+
+		// upload to first replica (forwarder handles others)
+		ctClient, err := chunktransfer.NewClient(composeHostAddress(replicaAddrs[0]))
+		if err != nil {
+			return fmt.Errorf("failed to connect to storage server %s: %w", replicaAddrs[0], err)
+		}
+		if err := ctClient.SendChunk(ctx, chunkID, "client-1", datasetID, replicaAddrs, finalData); err != nil {
+			_ = ctClient.Close()
+			return fmt.Errorf("failed to send chunk %s: %w", chunkID, err)
+		}
+		_ = ctClient.Close()
+		fmt.Printf("uploaded chunk_id=%s chunk_index=%d\n", chunkID, i)
 	}
 
 	return nil
-}
-
-func (u *FileUploader) getServersForChunk(ctx context.Context, name string, index uint32) (*masterpb.GetServersResponse, error) {
-	return u.masterClient.GetServers(ctx, &masterpb.GetServersRequest{
-		FileName:          name,
-		ChunkIndex:        index,
-		ReplicationFactor: 3,
-	})
 }

@@ -1,7 +1,6 @@
 package chunktransfer
 
 import (
-	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
@@ -23,11 +22,12 @@ const (
 
 type Server struct {
 	pb.UnimplementedChunkTransferServiceServer
-	db      *st.DiskEngine
-	baseDir string
+	db       *st.DiskEngine
+	baseDir  string
+	selfAddr string
 }
 
-func NewServer(baseDir string) (*Server, error) {
+func NewServer(baseDir string, selfAddr string) (*Server, error) {
 	if baseDir == "" {
 		baseDir = defaultBaseDir
 	}
@@ -36,11 +36,11 @@ func NewServer(baseDir string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{db: db, baseDir: baseDir}, nil
+	return &Server{db: db, baseDir: baseDir, selfAddr: selfAddr}, nil
 }
 
-func (s *Server) getFilePath(clientID, datasetID string, chunkID uint32) string {
-	return filepath.Join(s.baseDir, clientID, datasetID, fmt.Sprintf("%d", chunkID))
+func (s *Server) getFilePath(clientID, datasetID string, chunkID string) string {
+	return filepath.Join(s.baseDir, clientID, datasetID, chunkID)
 }
 
 func verifyChecksum(data []byte, checksum uint32) bool {
@@ -64,7 +64,7 @@ func createChunkFile(path string) (*os.File, error) {
 }
 
 // todo : make error messages more descriptive
-func (s *Server) createChunk(clientID, datasetID string, chunkID uint32) (*os.File, error) {
+func (s *Server) createChunk(clientID, datasetID string, chunkID string) (*os.File, error) {
 	if err := s.db.CreateChunk(chunkID, clientID, datasetID, chunkFileSize); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create chunk: %v", err)
 	}

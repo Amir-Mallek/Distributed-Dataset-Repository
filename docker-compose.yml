@@ -1,21 +1,79 @@
 services:
-  storage:
-    build:
-      context: .
-      dockerfile: Dockerfile.storage
-    container_name: ddr-storage
-    ports:
-      - "50051:50051"
-    volumes:
-      - storage-data:/app/chunks
-
   master:
     build:
       context: .
       dockerfile: Dockerfile.master
     container_name: ddr-master
-    profiles:
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+
+  storage1:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: ddr-storage-1
+    ports:
+      - "50052:50051"
+    environment:
+      - MASTER_ADDR=master:50051
+      - SERVER_ID=storage-1
+      - SERVER_ADDR=storage1:50051
+    volumes:
+      - storage-data-1:/app/chunks
+    depends_on:
+      - master
+
+  storage2:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: ddr-storage-2
+    ports:
+      - "50053:50051"
+    environment:
+      - MASTER_ADDR=master:50051
+      - SERVER_ID=storage-2
+      - SERVER_ADDR=storage2:50051
+    volumes:
+      - storage-data-2:/app/chunks
+    depends_on:
+      - master
+
+  storage3:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: ddr-storage-3
+    ports:
+      - "50054:50051"
+    environment:
+      - MASTER_ADDR=master:50051
+      - SERVER_ID=storage-3
+      - SERVER_ADDR=storage3:50051
+    volumes:
+      - storage-data-3:/app/chunks
+    depends_on:
+      - master
+
+  storage4:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: ddr-storage-4
+    ports:
+      - "50055:50051"
+    environment:
+      - MASTER_ADDR=master:50051
+      - SERVER_ID=storage-4
+      - SERVER_ADDR=storage4:50051
+    volumes:
+      - storage-data-4:/app/chunks
+    depends_on:
       - master
 
 volumes:
-  storage-data:
+  storage-data-1:
+  storage-data-2:
+  storage-data-3:
+  storage-data-4:

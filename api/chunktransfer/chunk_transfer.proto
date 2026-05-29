@@ -19,7 +19,7 @@ message WriteChunkRequest {
 }
 
 message ChunkMetadata {
-  uint32 chunkId = 1;
+  string chunkId = 1;
   string clientId = 2;
   string datasetId = 3;
   repeated string replicaSet = 4;
@@ -31,7 +31,7 @@ message ChunkBlock {
 }
 
 message ReadFromChunkRequest {
-  uint32 chunkId = 1;
+  string chunkId = 1;
   string clientId=2;
   string datasetId=3;
   uint32 rangeStart = 4;

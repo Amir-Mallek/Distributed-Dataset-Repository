@@ -55,10 +55,14 @@ func uint32ToBytes(v uint32) []byte {
 	return b
 }
 
-func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID string, totalSize uint32) error {
+func keyFromString(s string) []byte {
+	return []byte(s)
+}
+
+func (e *DiskEngine) CreateChunk(chunkID string, clientID string, datasetID string, totalSize uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
-		key := uint32ToBytes(chunkID)
+		key := keyFromString(chunkID)
 
 		if b.Get(key) != nil {
 			return ErrChunkAlreadyExists
@@ -80,10 +84,10 @@ func (e *DiskEngine) CreateChunk(chunkID uint32, clientID string, datasetID stri
 	})
 }
 
-func (e *DiskEngine) SealChunk(chunkID uint32, blockChecksums []uint32) error {
+func (e *DiskEngine) SealChunk(chunkID string, blockChecksums []uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
-		val := b.Get(uint32ToBytes(chunkID))
+		val := b.Get(keyFromString(chunkID))
 		if val == nil {
 			return ErrChunkNotFound
 		}
@@ -96,15 +100,15 @@ func (e *DiskEngine) SealChunk(chunkID uint32, blockChecksums []uint32) error {
 		meta.Status = pb.ChunkStatus_SEALED
 
 		metaBytes, _ := proto.Marshal(meta)
-		return b.Put(uint32ToBytes(chunkID), metaBytes)
+		return b.Put(keyFromString(chunkID), metaBytes)
 	})
 }
 
-func (e *DiskEngine) GetChunkMetadata(chunkID uint32) (*pb.ChunkMetaProto, error) {
+func (e *DiskEngine) GetChunkMetadata(chunkID string) (*pb.ChunkMetaProto, error) {
 	meta := &pb.ChunkMetaProto{}
 	err := e.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
-		val := b.Get(uint32ToBytes(chunkID))
+		val := b.Get(keyFromString(chunkID))
 		if val == nil {
 			return ErrChunkNotFound
 		}

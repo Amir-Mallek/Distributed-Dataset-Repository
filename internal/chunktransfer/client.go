@@ -34,7 +34,7 @@ func (c *Client) Close() error {
 }
 
 // SendChunk sends one metadata message followed by block messages.
-func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datasetId string, replicaSet []string, data []byte) error {
+func (c *Client) SendChunk(ctx context.Context, chunkId string, clientId, datasetId string, replicaSet []string, data []byte) error {
 	// Open a client-streaming WriteChunk call.
 	stream, err := c.client.WriteChunk(ctx)
 	if err != nil {
@@ -85,7 +85,7 @@ func (c *Client) SendChunk(ctx context.Context, chunkId uint32, clientId, datase
 }
 
 // ReadChunk reads a byte range from a chunk and returns the streamed bytes.
-func (c *Client) ReadFromChunk(ctx context.Context, chunkID uint32, rangeStart uint32, rangeEnd uint32) ([]byte, error) {
+func (c *Client) ReadFromChunk(ctx context.Context, chunkID string, rangeStart uint32, rangeEnd uint32) ([]byte, error) {
 	stream, err := c.client.ReadFromChunk(ctx, &pb.ReadFromChunkRequest{
 		ChunkId:    chunkID,
 		RangeStart: rangeStart,
