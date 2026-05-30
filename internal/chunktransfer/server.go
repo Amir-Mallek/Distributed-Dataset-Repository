@@ -111,13 +111,16 @@ func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) err
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
-			if err := s.db.SealChunk(chunkID, checksums); err != nil {
-				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
+			if err := file.Sync(); err != nil {
+				return status.Errorf(codes.Internal, "failed to sync chunk file: %v", err)
 			}
 			if forwarder != nil {
 				if err := forwarder.CloseAndWait(); err != nil {
 					return err
 				}
+			}
+			if err := s.db.SealChunk(chunkID, checksums); err != nil {
+				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
 			}
 			return stream.SendAndClose(&emptypb.Empty{})
 		}
