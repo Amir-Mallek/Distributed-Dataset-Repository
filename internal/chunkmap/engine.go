@@ -24,6 +24,7 @@ var (
 	ErrChunkAlreadyExists = errors.New("chunk already exists")
 	ErrNotSealed          = errors.New("chunk is not sealed")
 	ErrHasActiveReaders   = errors.New("chunk has active readers")
+	ErrServerNotFound     = errors.New("server not found")
 )
 
 // Engine is the chunk-server mapping store.
@@ -359,6 +360,108 @@ func (e *Engine) MarkCorrupted(chunkID string, serverID string) error {
 		record.Status = pb.ChunkStatus_CORRUPTED
 	}
 
+	return e.persist(record)
+}
+
+// ListServers returns a copy of all server records.
+func (e *Engine) ListServers() []*pb.ServerRecord {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	out := make([]*pb.ServerRecord, 0, len(e.servers))
+	for _, s := range e.servers {
+		out = append(out, proto.Clone(s).(*pb.ServerRecord))
+	}
+	return out
+}
+
+// ListChunks returns a copy of all chunk records.
+func (e *Engine) ListChunks() []*pb.ChunkRecord {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	out := make([]*pb.ChunkRecord, 0, len(e.chunks))
+	for _, c := range e.chunks {
+		out = append(out, proto.Clone(c).(*pb.ChunkRecord))
+	}
+	return out
+}
+
+// UpdateServerStatus updates the status of a known server record.
+func (e *Engine) UpdateServerStatus(serverID string, status pb.ServerStatus) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	sr, ok := e.servers[serverID]
+	if !ok {
+		return ErrServerNotFound
+	}
+	sr.Status = status
+	return e.persistServer(sr)
+}
+
+// RemoveReplicaFromChunk removes a server from replica and confirmed lists.
+func (e *Engine) RemoveReplicaFromChunk(chunkID string, serverID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	record, exists := e.chunks[chunkID]
+	if !exists {
+		return ErrChunkNotFound
+	}
+
+	filteredReplicas := make([]*pb.ServerRecord, 0, len(record.Replicas))
+	for _, r := range record.Replicas {
+		if r != nil && r.ServerId == serverID {
+			continue
+		}
+		filteredReplicas = append(filteredReplicas, r)
+	}
+	record.Replicas = filteredReplicas
+
+	filteredConfirmed := make([]string, 0, len(record.ConfirmedReplicaIds))
+	for _, s := range record.ConfirmedReplicaIds {
+		if s == serverID {
+			continue
+		}
+		filteredConfirmed = append(filteredConfirmed, s)
+	}
+	record.ConfirmedReplicaIds = filteredConfirmed
+
+	if record.PrimaryServerId == serverID {
+		record.PrimaryServerId = ""
+		for _, r := range record.Replicas {
+			if r != nil && r.ServerId != "" {
+				record.PrimaryServerId = r.ServerId
+				break
+			}
+		}
+	}
+
+	if len(record.ConfirmedReplicaIds) == 0 {
+		record.Status = pb.ChunkStatus_CORRUPTED
+	}
+
+	return e.persist(record)
+}
+
+// AddReplica adds a new replica server to the chunk if missing.
+func (e *Engine) AddReplica(chunkID string, server *pb.ServerRecord) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	record, exists := e.chunks[chunkID]
+	if !exists {
+		return ErrChunkNotFound
+	}
+
+	for _, r := range record.Replicas {
+		if r != nil && r.ServerId == server.ServerId {
+			return nil
+		}
+	}
+
+	record.Replicas = append(record.Replicas, server)
 	return e.persist(record)
 }
 

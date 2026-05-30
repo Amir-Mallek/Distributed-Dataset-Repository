@@ -3,15 +3,28 @@ package master
 import (
 	"context"
 	"errors"
+	"hash/crc32"
+	"io"
+	"log"
+	"time"
 
 	chunkmappb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunkmap"
+	transferpb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunktransfer"
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/master"
 	"github.com/Amir-Mallek/Distributed-Dataset-Repository/internal/chunkmap"
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+const (
+	defaultSweepInterval    = 10 * time.Second
+	defaultHeartbeatTimeout = 30 * time.Second
+	defaultChunkSizeBytes   = uint32(64 * 1024 * 1024)
 )
 
 // Server implements pb.MasterServiceServer by delegating every call to the
@@ -142,9 +155,241 @@ func (s *Server) ConfirmReplica(_ context.Context, req *pb.ConfirmReplicaRequest
 	return &emptypb.Empty{}, nil
 }
 
+func (s *Server) StartHeartbeatSweep(ctx context.Context, interval, timeout time.Duration) {
+	if interval <= 0 {
+		interval = defaultSweepInterval
+	}
+	if timeout <= 0 {
+		timeout = defaultHeartbeatTimeout
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.sweepStaleServers(timeout)
+			}
+		}
+	}()
+}
+
+func (s *Server) sweepStaleServers(timeout time.Duration) {
+	now := time.Now()
+	servers := s.engine.ListServers()
+
+	for _, srv := range servers {
+		if srv == nil || srv.ServerId == "" {
+			continue
+		}
+		if srv.Status == chunkmappb.ServerStatus_SERVER_OFFLINE {
+			continue
+		}
+		if srv.LastHeartbeat == nil {
+			continue
+		}
+		if now.Sub(srv.LastHeartbeat.AsTime()) <= timeout {
+			continue
+		}
+
+		if err := s.engine.UpdateServerStatus(srv.ServerId, chunkmappb.ServerStatus_SERVER_OFFLINE); err != nil {
+			log.Printf("failed to mark server %s offline: %v", srv.ServerId, err)
+			continue
+		}
+		if rr, ok := s.distributor.(*RoundRobinDistributor); ok {
+			rr.AddOrUpdateNode(StorageNode{ID: srv.ServerId, Address: srv.Address, IsAlive: false})
+		}
+
+		s.handleServerDown(srv.ServerId)
+	}
+}
+
+func (s *Server) handleServerDown(serverID string) {
+	chunks := s.engine.ListChunks()
+	for _, ch := range chunks {
+		if ch == nil {
+			continue
+		}
+		desired := len(ch.Replicas)
+		if !chunkHasServer(ch, serverID) {
+			continue
+		}
+		if err := s.engine.RemoveReplicaFromChunk(ch.ChunkId, serverID); err != nil {
+			log.Printf("failed to remove replica %s from chunk %s: %v", serverID, ch.ChunkId, err)
+			continue
+		}
+		s.ensureReplication(ch.ChunkId, desired)
+	}
+}
+
+func chunkHasServer(ch *chunkmappb.ChunkRecord, serverID string) bool {
+	for _, r := range ch.Replicas {
+		if r != nil && r.ServerId == serverID {
+			return true
+		}
+	}
+	for _, id := range ch.ConfirmedReplicaIds {
+		if id == serverID {
+			return true
+		}
+	}
+	if ch.PrimaryServerId == serverID {
+		return true
+	}
+	return false
+}
+
+func (s *Server) ensureReplication(chunkID string, desired int) {
+	if desired <= 0 {
+		return
+	}
+	chunk, err := s.engine.GetChunk(chunkID)
+	if err != nil {
+		log.Printf("failed to load chunk %s: %v", chunkID, err)
+		return
+	}
+	if len(chunk.Replicas) >= desired {
+		return
+	}
+
+	sourceAddr := s.pickSourceAddr(chunk)
+	if sourceAddr == "" {
+		log.Printf("no available source replica for chunk %s", chunkID)
+		return
+	}
+
+	exclude := make([]string, 0, len(chunk.Replicas))
+	for _, r := range chunk.Replicas {
+		if r != nil && r.ServerId != "" {
+			exclude = append(exclude, r.ServerId)
+		}
+	}
+
+	missing := desired - len(chunk.Replicas)
+	selected, err := s.distributor.SelectServers(missing, exclude)
+	if err != nil {
+		log.Printf("not enough healthy servers to re-replicate chunk %s: %v", chunkID, err)
+		return
+	}
+
+	for _, node := range selected {
+		if node.Address == "" || node.ID == "" {
+			continue
+		}
+		serverRecord := &chunkmappb.ServerRecord{ServerId: node.ID, Address: node.Address, Status: chunkmappb.ServerStatus_SERVER_HEALTHY}
+		if err := s.engine.AddReplica(chunkID, serverRecord); err != nil {
+			log.Printf("failed to add replica %s to chunk %s: %v", node.ID, chunkID, err)
+			continue
+		}
+		if err := s.replicateChunk(chunk, sourceAddr, node.Address); err != nil {
+			log.Printf("replication failed for chunk %s to %s: %v", chunkID, node.Address, err)
+			_ = s.engine.RemoveReplicaFromChunk(chunkID, node.ID)
+			continue
+		}
+		_ = s.engine.ConfirmReplica(chunkID, node.ID)
+	}
+}
+
+func (s *Server) pickSourceAddr(chunk *chunkmappb.ChunkRecord) string {
+	servers := s.engine.ListServers()
+	serverMap := make(map[string]*chunkmappb.ServerRecord, len(servers))
+	for _, srv := range servers {
+		if srv != nil && srv.ServerId != "" {
+			serverMap[srv.ServerId] = srv
+		}
+	}
+	for _, id := range chunk.ConfirmedReplicaIds {
+		if srv, ok := serverMap[id]; ok && srv.Status == chunkmappb.ServerStatus_SERVER_HEALTHY && srv.Address != "" {
+			return srv.Address
+		}
+	}
+	for _, r := range chunk.Replicas {
+		if r != nil && r.Address != "" {
+			return r.Address
+		}
+	}
+	return ""
+}
+
+func (s *Server) replicateChunk(chunk *chunkmappb.ChunkRecord, sourceAddr, targetAddr string) error {
+	if sourceAddr == "" || targetAddr == "" {
+		return errors.New("missing source or target address")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	srcConn, err := grpc.Dial(sourceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return err
+	}
+	defer srcConn.Close()
+
+	tgtConn, err := grpc.Dial(targetAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return err
+	}
+	defer tgtConn.Close()
+
+	srcClient := transferpb.NewChunkTransferServiceClient(srcConn)
+	tgtClient := transferpb.NewChunkTransferServiceClient(tgtConn)
+
+	readStream, err := srcClient.ReadFromChunk(ctx, &transferpb.ReadFromChunkRequest{ChunkId: chunk.ChunkId, RangeStart: 0, RangeEnd: defaultChunkSizeBytes})
+	if err != nil {
+		return err
+	}
+
+	writeStream, err := tgtClient.WriteChunk(ctx)
+	if err != nil {
+		return err
+	}
+
+	meta := &transferpb.ChunkMetadata{
+		ChunkId:    chunk.ChunkId,
+		ClientId:   chunk.ClientId,
+		DatasetId:  chunk.DatasetId,
+		ReplicaSet: []string{targetAddr},
+	}
+	if err := writeStream.Send(&transferpb.WriteChunkRequest{Msg: &transferpb.WriteChunkRequest_Meta{Meta: meta}}); err != nil {
+		return err
+	}
+
+	for {
+		msg, err := readStream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		block := msg.Data
+		if len(block) == 0 {
+			continue
+		}
+		checksum := crc32.ChecksumIEEE(block)
+		if err := writeStream.Send(&transferpb.WriteChunkRequest{Msg: &transferpb.WriteChunkRequest_Block{Block: &transferpb.ChunkBlock{Data: block, Checksum: checksum}}}); err != nil {
+			return err
+		}
+	}
+
+	if _, err := writeStream.CloseAndRecv(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Server) MarkCorrupted(_ context.Context, req *pb.MarkCorruptedRequest) (*emptypb.Empty, error) {
 	if err := s.engine.MarkCorrupted(req.ChunkId, req.ServerId); err != nil {
 		return nil, grpcErr(err)
+	}
+	if err := s.engine.RemoveReplicaFromChunk(req.ChunkId, req.ServerId); err != nil {
+		return nil, grpcErr(err)
+	}
+	chunk, err := s.engine.GetChunk(req.ChunkId)
+	if err == nil {
+		s.ensureReplication(req.ChunkId, len(chunk.Replicas)+1)
 	}
 	return &emptypb.Empty{}, nil
 }

@@ -84,7 +84,7 @@ func (e *DiskEngine) CreateChunk(chunkID string, clientID string, datasetID stri
 	})
 }
 
-func (e *DiskEngine) SealChunk(chunkID string, blockChecksums []uint32) error {
+func (e *DiskEngine) SealChunk(chunkID string, blockChecksums []uint32, totalSize uint32) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(chunksBucket))
 		val := b.Get(keyFromString(chunkID))
@@ -98,6 +98,7 @@ func (e *DiskEngine) SealChunk(chunkID string, blockChecksums []uint32) error {
 		}
 		meta.BlockChecksums = blockChecksums
 		meta.Status = pb.ChunkStatus_SEALED
+		meta.TotalSize = totalSize
 
 		metaBytes, _ := proto.Marshal(meta)
 		return b.Put(keyFromString(chunkID), metaBytes)

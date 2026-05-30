@@ -2,10 +2,13 @@
 .PHONY: proto proto-generate proto-clean
 .PHONY: run-client run-master run-stserver
 .PHONY: test test-v vet fmt tidy deps
-.PHONY: compose-up compose-down compose-logs e2e-up e2e-down e2e-generate e2e-upload e2e-read e2e-clean generate-test-file
+.PHONY: compose-up compose-down compose-logs e2e-up e2e-down e2e-generate e2e-upload e2e-read e2e-clean e2e-fault
 .PHONY: win-build win-client win-master win-stserver win-clean win-proto-clean
 .PHONY: run-win-client run-win-master run-win-stserver
 .PHONY: help clean
+
+# Suppress recursive make enter/leave directory messages for cleaner output.
+MAKEFLAGS += --no-print-directory
 
 # ── Default ────────────────────────────────────────────────────────────────────
 all: build
@@ -156,6 +159,9 @@ e2e-read:
 e2e-clean: compose-down
 	@rm -rf artifacts
 
+e2e-fault:
+	@bash ./tools/e2e/fault_tolerance.sh
+
 # ── Run  (Windows) ─────────────────────────────────────────────────────────────
 # Usage: make run-win-stserver
 run-win-stserver: win-stserver
@@ -228,4 +234,3 @@ help:
 	@echo "    clean              Remove bin/                             (Linux/macOS)"
 	@echo "    win-clean          Remove bin/                             (Windows)"
 	@echo ""
-

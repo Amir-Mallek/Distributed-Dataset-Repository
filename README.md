@@ -96,6 +96,19 @@ What each step does:
 
 If you want the chunk ID automatically, run `make e2e-upload` first and copy the `chunk_id=...` line from `artifacts/upload.log`.
 
+## Fault-Tolerance E2E
+
+Run the fault-tolerance test suite against the compose stack:
+
+```bash
+make e2e-fault
+```
+
+This covers:
+
+- storage server down + heartbeat timeout + re-replication to a spare node
+- chunk corruption + read checksum failure + re-replication to a spare node
+
 ## Generate a Test File
 
 Create a file of a specific size:

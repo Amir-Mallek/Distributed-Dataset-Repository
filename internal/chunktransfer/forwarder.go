@@ -30,8 +30,7 @@ func cloneBlock(block *pb.ChunkBlock) *pb.ChunkBlock {
 func (f *AsyncForwarder) start() {
 	go func() {
 		for block := range f.blocks {
-			err := f.stream.Send(&pb.WriteChunkRequest{Msg: &pb.WriteChunkRequest_Block{Block: block}})
-			if err != nil {
+			if err := f.stream.Send(&pb.WriteChunkRequest{Msg: &pb.WriteChunkRequest_Block{Block: block}}); err != nil {
 				f.done <- fmt.Errorf("failed to forward block to server %s: %v", f.address, err)
 				close(f.done)
 				return
@@ -39,7 +38,7 @@ func (f *AsyncForwarder) start() {
 		}
 
 		if _, err := f.stream.CloseAndRecv(); err != nil {
-			f.done <- fmt.Errorf("failed to close forwarding block to server %s: %v", f.address, err)
+			f.done <- fmt.Errorf("failed to receive ack from replica %s: %v", f.address, err)
 			close(f.done)
 			return
 		}

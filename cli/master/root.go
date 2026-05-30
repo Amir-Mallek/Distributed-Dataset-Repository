@@ -1,8 +1,10 @@
 package master
 
 import (
+	"context"
 	"log"
 	"net"
+	"time"
 
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/master"
 	master "github.com/Amir-Mallek/Distributed-Dataset-Repository/internal/master"
@@ -38,6 +40,7 @@ func newServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			s.StartHeartbeatSweep(context.Background(), 10*time.Second, 15*time.Second)
 			grpcServer := grpc.NewServer()
 			pb.RegisterClientServiceServer(grpcServer, s)
 			pb.RegisterStorageServiceServer(grpcServer, s)

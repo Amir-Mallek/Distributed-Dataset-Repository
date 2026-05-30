@@ -39,15 +39,15 @@ func runServer() error {
 
 	grpcServer := grpc.NewServer()
 	selfAddr := os.Getenv("SERVER_ADDR")
-	server, err := chunktransfer.NewServer(defaultDataDir, selfAddr)
+	masterAddr := os.Getenv("MASTER_ADDR")
+	serverID := os.Getenv("SERVER_ID")
+	server, err := chunktransfer.NewServer(defaultDataDir, selfAddr, masterAddr, serverID)
 	if err != nil {
 		return err
 	}
 	pb.RegisterChunkTransferServiceServer(grpcServer, server)
 
 	// optional registration with master
-	masterAddr := os.Getenv("MASTER_ADDR")
-	serverID := os.Getenv("SERVER_ID")
 	serverAddr := selfAddr
 	if masterAddr != "" && serverID != "" {
 		go func() {

@@ -1,15 +1,20 @@
 package chunktransfer
 
 import (
+	"context"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	pb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/chunktransfer"
+	masterpb "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/master"
 	pb2 "github.com/Amir-Mallek/Distributed-Dataset-Repository/api/metastorage"
 	st "github.com/Amir-Mallek/Distributed-Dataset-Repository/internal/metastorage"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -18,16 +23,19 @@ const (
 	maxBlocks      = 1024
 	chunkFileSize  = 64 * 1024 * 1024 // 64 MB
 	defaultBaseDir = "chunks"
+	readBlockSize  = 1024 * 1024
 )
 
 type Server struct {
 	pb.UnimplementedChunkTransferServiceServer
-	db       *st.DiskEngine
-	baseDir  string
-	selfAddr string
+	db         *st.DiskEngine
+	baseDir    string
+	selfAddr   string
+	masterAddr string
+	serverID   string
 }
 
-func NewServer(baseDir string, selfAddr string) (*Server, error) {
+func NewServer(baseDir string, selfAddr string, masterAddr string, serverID string) (*Server, error) {
 	if baseDir == "" {
 		baseDir = defaultBaseDir
 	}
@@ -36,7 +44,7 @@ func NewServer(baseDir string, selfAddr string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{db: db, baseDir: baseDir, selfAddr: selfAddr}, nil
+	return &Server{db: db, baseDir: baseDir, selfAddr: selfAddr, masterAddr: masterAddr, serverID: serverID}, nil
 }
 
 func (s *Server) getFilePath(clientID, datasetID string, chunkID string) string {
@@ -108,17 +116,23 @@ func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) err
 	defer file.Close()
 
 	blockCount := 0
+	bytesWritten := 0
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
-			if err := s.db.SealChunk(chunkID, checksums); err != nil {
-				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
+			if err := file.Sync(); err != nil {
+				return status.Errorf(codes.Internal, "failed to sync chunk file: %v", err)
 			}
 			if forwarder != nil {
 				if err := forwarder.CloseAndWait(); err != nil {
 					return err
 				}
 			}
+			sealedChecksums := checksums[:blockCount]
+			if err := s.db.SealChunk(chunkID, sealedChecksums, uint32(bytesWritten)); err != nil {
+				return status.Errorf(codes.Internal, "failed to seal chunk: %v", err)
+			}
+			s.confirmReplica(stream.Context(), chunkID)
 			return stream.SendAndClose(&emptypb.Empty{})
 		}
 		if err != nil {
@@ -135,12 +149,14 @@ func (s *Server) WriteChunk(stream pb.ChunkTransferService_WriteChunkServer) err
 		block := blockMsg.Block
 
 		if !verifyChecksum(block.Data, block.Checksum) {
+			s.reportCorrupted(stream.Context(), chunkID)
 			return status.Error(codes.DataLoss, "checksum mismatch for block")
 		}
 
 		if _, err := file.Write(block.Data); err != nil {
 			return status.Errorf(codes.Internal, "failed to write block: %v", err)
 		}
+		bytesWritten += len(block.Data)
 
 		if forwarder != nil {
 			if err := forwarder.Send(block); err != nil {
@@ -187,6 +203,35 @@ func (s *Server) ReadFromChunk(req *pb.ReadFromChunkRequest, stream pb.ChunkTran
 		return status.Errorf(codes.Internal, "failed to seek in chunk file: %v", err)
 	}
 
+	blockSize := int64(readBlockSize)
+	aligned := start%blockSize == 0 && end%blockSize == 0 && len(meta.BlockChecksums) > 0
+	if aligned {
+		endBlock := int(end / blockSize)
+		if endBlock > len(meta.BlockChecksums) {
+			aligned = false
+		}
+	}
+
+	if aligned {
+		blockIndex := int(start / blockSize)
+		blockBuf := make([]byte, readBlockSize)
+		for offset := start; offset < end; offset += blockSize {
+			if _, err := io.ReadFull(f, blockBuf); err != nil {
+				return status.Errorf(codes.Internal, "failed to read chunk block: %v", err)
+			}
+			checksum := crc32.ChecksumIEEE(blockBuf)
+			if checksum != meta.BlockChecksums[blockIndex] {
+				s.reportCorrupted(stream.Context(), meta.ChunkId)
+				return status.Error(codes.DataLoss, "checksum mismatch for block")
+			}
+			if sendErr := stream.Send(&pb.ChunkData{Data: blockBuf}); sendErr != nil {
+				return status.Errorf(codes.Internal, "failed to send data: %v", sendErr)
+			}
+			blockIndex++
+		}
+		return nil
+	}
+
 	buf := make([]byte, 64*1024)
 	remaining := end - start
 
@@ -216,4 +261,38 @@ func (s *Server) ReadFromChunk(req *pb.ReadFromChunkRequest, stream pb.ChunkTran
 	}
 
 	return nil
+}
+
+func (s *Server) reportCorrupted(ctx context.Context, chunkID string) {
+	if s.masterAddr == "" || s.serverID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.Dial(s.masterAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	client := masterpb.NewStorageServiceClient(conn)
+	_, _ = client.MarkCorrupted(ctx, &masterpb.MarkCorruptedRequest{ChunkId: chunkID, ServerId: s.serverID})
+}
+
+func (s *Server) confirmReplica(ctx context.Context, chunkID string) {
+	if s.masterAddr == "" || s.serverID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.Dial(s.masterAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	client := masterpb.NewStorageServiceClient(conn)
+	_, _ = client.ConfirmReplica(ctx, &masterpb.ConfirmReplicaRequest{ChunkId: chunkID, ServerId: s.serverID, Address: s.selfAddr})
 }
